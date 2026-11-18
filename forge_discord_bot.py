@@ -13,7 +13,7 @@ from datetime import datetime
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
-POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL", "10"))
+POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL", "60"))
 API_URL = "https://sp-mod.com/api/v0/mods"
 SEEN_FILE = "seen_mods.json"
 TARGET_SPT = "4.1"
