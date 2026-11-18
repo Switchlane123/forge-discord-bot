@@ -1,6 +1,6 @@
 """
 SPT Forge Discord Bot
-Posts new mods from https://sp-mod.com to a Discord channel.
+Posts new SPT 4.1.x mods from https://sp-mod.com to a Discord channel.
 """
 
 import os
@@ -16,6 +16,7 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
 POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL", "10"))
 API_URL = "https://sp-mod.com/api/v0/mods"
 SEEN_FILE = "seen_mods.json"
+TARGET_SPT = "4.1"
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
@@ -32,6 +33,12 @@ def save_seen(seen: set):
 
 seen_ids = load_seen()
 
+def is_target_spt(constraint: str) -> bool:
+    if not constraint:
+        return False
+    c = constraint.replace("~", "").replace("^", "").replace(" ", "").strip()
+    return c.startswith(TARGET_SPT)
+
 async def get_latest_version(session, mod_id):
     try:
         async with session.get(f"https://sp-mod.com/api/v0/mod/{mod_id}/versions?per_page=1") as resp:
@@ -45,6 +52,18 @@ async def get_latest_version(session, mod_id):
             return v.get("version"), v.get("spt_version_constraint", "").strip()
     except Exception:
         return None, None
+
+async def fetch_newest_mods(session):
+    async with session.get(f"{API_URL}?per_page=20") as resp:
+        if resp.status != 200:
+            return []
+        data = await resp.json()
+        last_page = data.get("meta", {}).get("last_page", 1)
+    async with session.get(f"{API_URL}?per_page=20&page={last_page}") as resp:
+        if resp.status != 200:
+            return []
+        data = await resp.json()
+        return data.get("data", [])
 
 @client.event
 async def on_ready():
@@ -61,27 +80,25 @@ async def check_new_mods():
 
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(f"{API_URL}?order=created&per_page=20") as resp:
-                if resp.status != 200:
-                    print(f"API error: {resp.status}")
-                    return
-                data = await resp.json()
+            mods = await fetch_newest_mods(session)
         except Exception as e:
             print(f"Request failed: {e}")
             return
 
-        mods = data.get("data", [])
         new_mods = []
-
         for mod in mods:
             mod_id = str(mod.get("id"))
-            if mod_id not in seen_ids:
-                version, spt = await get_latest_version(session, mod_id)
-                mod["_version"] = version or "?"
-                mod["_spt"] = spt or "?"
-                new_mods.append(mod)
+            if mod_id in seen_ids:
+                continue
+            version, spt = await get_latest_version(session, mod_id)
+            if not is_target_spt(spt):
                 seen_ids.add(mod_id)
-                await asyncio.sleep(0.3)
+                continue
+            mod["_version"] = version or "?"
+            mod["_spt"] = spt or "?"
+            new_mods.append(mod)
+            seen_ids.add(mod_id)
+            await asyncio.sleep(0.3)
 
     for mod in reversed(new_mods):
         owner = mod.get("owner") or {}
@@ -104,7 +121,7 @@ async def check_new_mods():
 
     if new_mods:
         save_seen(seen_ids)
-        print(f"Posted {len(new_mods)} new mods")
+        print(f"Posted {len(new_mods)} new SPT 4.1 mods")
 
 if __name__ == "__main__":
     if not DISCORD_TOKEN or CHANNEL_ID == 0:
