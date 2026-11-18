@@ -1,6 +1,7 @@
 """
 SPT Forge Discord Bot
 Posts new SPT 4.1.x mods from https://sp-mod.com to a Discord channel.
+Optimized: checks only the newest 5 mods and caches versions.
 """
 
 import os
@@ -16,22 +17,24 @@ CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
 POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL", "60"))
 API_URL = "https://sp-mod.com/api/v0/mods"
 SEEN_FILE = "seen_mods.json"
+VERSION_CACHE_FILE = "version_cache.json"
 TARGET_SPT = "4.1"
 
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 
-def load_seen() -> set:
-    if os.path.exists(SEEN_FILE):
-        with open(SEEN_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
+def load_json(path, default):
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return default
 
-def save_seen(seen: set):
-    with open(SEEN_FILE, "w") as f:
-        json.dump(list(seen), f)
+def save_json(path, data):
+    with open(path, "w") as f:
+        json.dump(data, f)
 
-seen_ids = load_seen()
+seen_ids = set(load_json(SEEN_FILE, []))
+version_cache = load_json(VERSION_CACHE_FILE, {})
 
 def is_target_spt(constraint: str) -> bool:
     if not constraint:
@@ -40,6 +43,8 @@ def is_target_spt(constraint: str) -> bool:
     return c.startswith(TARGET_SPT)
 
 async def get_latest_version(session, mod_id):
+    if mod_id in version_cache:
+        return version_cache[mod_id].get("version"), version_cache[mod_id].get("spt")
     try:
         async with session.get(f"https://sp-mod.com/api/v0/mod/{mod_id}/versions?per_page=1") as resp:
             if resp.status != 200:
@@ -49,17 +54,21 @@ async def get_latest_version(session, mod_id):
             if not versions:
                 return None, None
             v = versions[0]
-            return v.get("version"), v.get("spt_version_constraint", "").strip()
+            version = v.get("version")
+            spt = v.get("spt_version_constraint", "").strip()
+            version_cache[mod_id] = {"version": version, "spt": spt}
+            save_json(VERSION_CACHE_FILE, version_cache)
+            return version, spt
     except Exception:
         return None, None
 
 async def fetch_newest_mods(session):
-    async with session.get(f"{API_URL}?per_page=20") as resp:
+    async with session.get(f"{API_URL}?per_page=5") as resp:
         if resp.status != 200:
             return []
         data = await resp.json()
         last_page = data.get("meta", {}).get("last_page", 1)
-    async with session.get(f"{API_URL}?per_page=20&page={last_page}") as resp:
+    async with session.get(f"{API_URL}?per_page=5&page={last_page}") as resp:
         if resp.status != 200:
             return []
         data = await resp.json()
@@ -98,7 +107,7 @@ async def check_new_mods():
             mod["_spt"] = spt or "?"
             new_mods.append(mod)
             seen_ids.add(mod_id)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.2)
 
     for mod in reversed(new_mods):
         owner = mod.get("owner") or {}
@@ -120,7 +129,7 @@ async def check_new_mods():
         await asyncio.sleep(1)
 
     if new_mods:
-        save_seen(seen_ids)
+        save_json(SEEN_FILE, list(seen_ids))
         print(f"Posted {len(new_mods)} new SPT 4.1 mods")
 
 if __name__ == "__main__":
