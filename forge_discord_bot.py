@@ -1,7 +1,6 @@
 """
 SPT Forge Discord Bot
-Posts new SPT 4.1.x mods from https://sp-mod.com to a Discord channel.
-Optimized: checks only the newest 5 mods and caches versions.
+Posts only new SPT 4.1.x mods from the last page of https://sp-mod.com.
 """
 
 import os
